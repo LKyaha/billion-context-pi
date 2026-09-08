@@ -88,6 +88,7 @@ export function normalizeCheckpointInput(input: ReasoningCheckpointInput): Reaso
 
 export class ReasoningStore {
   private cache = new Map<string, ReasoningState>();
+  private appendTails = new Map<string, Promise<void>>();
 
   async load(sessionFile: string | undefined, sessionId: string): Promise<ReasoningState> {
     const key = cacheKey(sessionFile, sessionId);
@@ -130,27 +131,33 @@ export class ReasoningStore {
     if (!normalized.topic) throw new Error("Reasoning checkpoint topic must not be empty.");
     if (!normalized.goal) throw new Error("Reasoning checkpoint goal must not be empty.");
 
-    const state = await this.load(sessionFile, sessionId);
-    const checkpoint: ReasoningCheckpoint = {
-      id: formatCheckpointId(state.nextCheckpointId),
-      createdAt: Date.now(),
-      topic: normalized.topic,
-      goal: normalized.goal,
-      hypotheses: normalized.hypotheses ?? [],
-      evidence: normalized.evidence ?? [],
-      eliminated: normalized.eliminated ?? [],
-      decisions: normalized.decisions ?? [],
-      openQuestions: normalized.openQuestions ?? [],
-      nextSteps: normalized.nextSteps ?? [],
-      tags: normalized.tags ?? [],
-    };
-    const nextState: ReasoningState = {
-      version: 1,
-      nextCheckpointId: state.nextCheckpointId + 1,
-      checkpoints: [...state.checkpoints, checkpoint],
-    };
-    await this.save(nextState, sessionFile, sessionId);
-    return checkpoint;
+    const key = cacheKey(sessionFile, sessionId);
+    const release = await this.acquireAppendLock(key);
+    try {
+      const state = await this.load(sessionFile, sessionId);
+      const checkpoint: ReasoningCheckpoint = {
+        id: formatCheckpointId(state.nextCheckpointId),
+        createdAt: Date.now(),
+        topic: normalized.topic,
+        goal: normalized.goal,
+        hypotheses: normalized.hypotheses ?? [],
+        evidence: normalized.evidence ?? [],
+        eliminated: normalized.eliminated ?? [],
+        decisions: normalized.decisions ?? [],
+        openQuestions: normalized.openQuestions ?? [],
+        nextSteps: normalized.nextSteps ?? [],
+        tags: normalized.tags ?? [],
+      };
+      const nextState: ReasoningState = {
+        version: 1,
+        nextCheckpointId: state.nextCheckpointId + 1,
+        checkpoints: [...state.checkpoints, checkpoint],
+      };
+      await this.save(nextState, sessionFile, sessionId);
+      return checkpoint;
+    } finally {
+      release();
+    }
   }
 
   async search(
@@ -167,24 +174,44 @@ export class ReasoningStore {
     this.cache.clear();
   }
 
+  private async acquireAppendLock(key: string): Promise<() => void> {
+    const previous = this.appendTails.get(key) ?? Promise.resolve();
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const tail = previous.then(() => gate);
+    this.appendTails.set(key, tail);
+    await previous;
+    return () => {
+      releaseGate();
+      if (this.appendTails.get(key) === tail) this.appendTails.delete(key);
+    };
+  }
+
   private async save(state: ReasoningState, sessionFile: string | undefined, sessionId: string): Promise<void> {
     const key = cacheKey(sessionFile, sessionId);
-    this.cache.set(key, state);
     const file = reasoningFileFor(sessionFile);
-    if (!file) return;
+    if (!file) {
+      this.cache.set(key, state);
+      return;
+    }
 
     const dir = path.dirname(file);
+    const tmp = path.join(dir, `.reasoning-tmp-${path.basename(file)}`);
     try {
       await fs.mkdir(dir, { recursive: true });
-      const tmp = path.join(dir, `.reasoning-tmp-${path.basename(file)}`);
       await fs.writeFile(tmp, JSON.stringify(state), "utf8");
       await fs.rename(tmp, file);
+      this.cache.set(key, state);
     } catch (error) {
+      await fs.rm(tmp, { force: true }).catch(() => undefined);
       logError("reasoning", {
         event: "save-failed",
         file,
         error: error instanceof Error ? error.message : String(error),
       });
+      throw error;
     }
   }
 
@@ -277,7 +304,7 @@ function formatCheckpointId(value: number): string {
 }
 
 function normalizeSearchText(value: string): string {
-  return value.toLocaleLowerCase().replace(/\s+/g, " ").trim();
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function queryTerms(normalizedQuery: string): string[] {
