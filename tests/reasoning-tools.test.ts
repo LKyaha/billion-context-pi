@@ -100,6 +100,31 @@ test("checkpoint_reasoning persists state, skips duplicates, and search_reasonin
   await rm(dir, { recursive: true, force: true });
 });
 
+test("checkpoint_reasoning sanitizes dense literal unicode escape corruption", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "reasoning-tools-sanitize-"));
+  const sessionFile = path.join(dir, "session.jsonl");
+  const ctx = fakeCtx(sessionFile);
+  const store = new ReasoningStore();
+  const checkpointTool = makeCheckpointReasoningTool(store);
+  const escaped = "\\u4f60".repeat(21);
+
+  await checkpointTool.execute(
+    "tc-sanitize",
+    {
+      topic: "Unicode corruption",
+      goal: "Keep persistent reasoning readable",
+      evidence: escaped,
+    },
+    undefined,
+    undefined,
+    ctx as never,
+  );
+
+  const state = await store.load(sessionFile, "reasoning-tool-session");
+  assert.equal(state.checkpoints[0]!.evidence[0], "你".repeat(21));
+  await rm(dir, { recursive: true, force: true });
+});
+
 test("search_reasoning reports no match without dumping unrelated checkpoints", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "reasoning-tools-empty-"));
   const sessionFile = path.join(dir, "session.jsonl");
