@@ -12,10 +12,11 @@ const extension: ExtensionFactory = (pi) => {
   baseExtension(pi);
   if (process.env.BILLION_CONTEXT_PROXY || userConfigDisabled(process.cwd())) return;
 
+  // Keep one long-lived store per loaded extension. The store is already keyed
+  // by session file/session id, so clearing it at session_start is unnecessary.
+  // More importantly, file-less Pi sessions have no sidecar to reload from:
+  // invalidating here would erase their reasoning checkpoints on every start.
   const store = new ReasoningStore();
-  pi.on("session_start", () => {
-    store.invalidate();
-  });
   pi.on("before_agent_start", (event, ctx) => {
     if (!isPiHost(ctx.sessionManager)) return;
     return { systemPrompt: appendReasoningMemoryPrompt(event.systemPrompt) };
