@@ -9,7 +9,8 @@ import {
   type ReasoningCheckpointInput,
   type ReasoningSearchResult,
 } from "./reasoning-memory.js";
-import { logThrow } from "./log.js";
+import { debug, logThrow, logWarn } from "./log.js";
+import { countUnicodeEscapes, findUnverifiableUserQuote, sanitizeSummary } from "./summary-sanitize.js";
 
 const CheckpointParams = Type.Object({
   topic: Type.String({
@@ -71,7 +72,7 @@ export function makeCheckpointReasoningTool(store: ReasoningStore): ToolDefiniti
     promptGuidelines: [
       "Checkpoint when a root cause is found, an architecture choice is made, a hypothesis is ruled out, or a long investigation reaches a durable milestone.",
       "Before compressing decision-rich investigation history, checkpoint the durable WHY if it is not already captured.",
-      "Do not checkpoint routine logs, repeated unchanged state, or private/raw chain-of-thought.",
+      "Do not checkpoint routine logs, repeated unchanged state, user instructions verbatim, or private/raw chain-of-thought.",
       "Keep entries concise and inspectable: hypothesis → evidence → elimination → decision → unresolved → next.",
     ],
     parameters: CheckpointParams,
@@ -79,11 +80,12 @@ export function makeCheckpointReasoningTool(store: ReasoningStore): ToolDefiniti
       const standDown = standDownMessage(ctx);
       if (standDown) return { details: undefined, content: [{ type: "text", text: standDown }] };
       const args = params as CheckpointArgs;
+      const sid = ctx.sessionManager.getSessionId();
       try {
         const appended = await store.appendWithStatus(
           ctx.sessionManager.getSessionFile() ?? undefined,
-          ctx.sessionManager.getSessionId(),
-          checkpointInput(args),
+          sid,
+          sanitizeCheckpointInput(checkpointInput(args), sid),
         );
         return {
           details: undefined,
@@ -91,7 +93,7 @@ export function makeCheckpointReasoningTool(store: ReasoningStore): ToolDefiniti
         };
       } catch (error) {
         logThrow("reasoning", error, {
-          sid: ctx.sessionManager.getSessionId(),
+          sid,
           phase: "checkpoint",
           topic: args.topic,
         });
@@ -175,6 +177,46 @@ function checkpointInput(args: CheckpointArgs): ReasoningCheckpointInput {
     openQuestions: parseReasoningList(args.openQuestions),
     nextSteps: parseReasoningList(args.nextSteps),
     tags: parseReasoningList(args.tags, true),
+  };
+}
+
+function sanitizeCheckpointInput(input: ReasoningCheckpointInput, sid: string): ReasoningCheckpointInput {
+  const sanitize = (field: string, value: string): string => {
+    const result = sanitizeSummary(value);
+    if (result.unescaped) {
+      debug.event("reasoning", {
+        sid,
+        event: "checkpoint-unescaped",
+        field,
+        escapes: countUnicodeEscapes(value),
+        beforeLen: value.length,
+        afterLen: result.text.length,
+      });
+    }
+    const unverifiedQuote = findUnverifiableUserQuote(result.text);
+    if (unverifiedQuote !== null) {
+      logWarn("reasoning", {
+        sid,
+        event: "checkpoint-unverifiable-quote",
+        field,
+        claim: unverifiedQuote,
+      });
+    }
+    return result.text;
+  };
+  const sanitizeList = (field: string, values: readonly string[] | undefined): string[] =>
+    (values ?? []).map((value) => sanitize(field, value));
+
+  return {
+    topic: sanitize("topic", input.topic),
+    goal: sanitize("goal", input.goal),
+    hypotheses: sanitizeList("hypotheses", input.hypotheses),
+    evidence: sanitizeList("evidence", input.evidence),
+    eliminated: sanitizeList("eliminated", input.eliminated),
+    decisions: sanitizeList("decisions", input.decisions),
+    openQuestions: sanitizeList("openQuestions", input.openQuestions),
+    nextSteps: sanitizeList("nextSteps", input.nextSteps),
+    tags: sanitizeList("tags", input.tags),
   };
 }
 
