@@ -222,6 +222,98 @@ Rejected as the sole mechanism. Those artifacts are useful evidence but are frag
 
 ---
 
+# Checkpoint 0003 — V1 Storage and Tool Architecture
+
+**Date:** 2026-09-08  
+**Branch:** `2026-09-08_reasoning-memory`
+
+## Goal
+
+Freeze the smallest low-risk architecture for the first usable Pi reasoning-memory implementation before source edits begin.
+
+## Hypotheses
+
+### H1 — An independent reasoning sidecar is safer than extending kernel compression state
+
+`CompressionState` belongs to `acp-kernel` and is consumed by compression/rebuild logic. Reasoning memory is adapter-specific metadata with a different lifecycle. Persisting it in `<session>.reasoning.json` avoids coupling a Pi-only experiment to kernel state migration and makes rollback/removal trivial.
+
+### H2 — Append-only checkpoints are sufficient for v1
+
+Reasoning state is naturally milestone-oriented. An append-only ledger avoids mutation/supersession complexity while preserving the chronology needed for search and recovery. Topic-level replacement can be added later if checkpoint growth becomes a real problem.
+
+### H3 — A dedicated search path is clearer than extending `search_context` immediately
+
+Existing `search_context` has stable semantics around compression blocks and historical messages, including decompression hints. Mixing reasoning checkpoints into those results would blur the distinction between conversation retrieval and rationale retrieval. A separate `search_reasoning` tool keeps v1 behavior obvious.
+
+### H4 — Prompt-level checkpoint-before-compress guidance is the safest first reasoning-aware compression policy
+
+Hard-blocking `compress` unless a checkpoint exists would be too aggressive for routine logs and could create tool-call loops. A system-prompt rule can target only high-value investigation/decision content and leave ordinary compression unchanged.
+
+## Evidence
+
+- `src/state.ts` already keeps adapter-owned `liveRefOrigins` alongside kernel state in the `.acp.json` sidecar, proving the adapter can own persistence outside the kernel model, but that file is tightly tied to compression loading/inheritance semantics.
+- `SessionStateStore` already walks Pi `parentSession` chains up to eight levels, establishing a tested fork/clone inheritance pattern that reasoning storage can mirror.
+- File-less Pi sessions are explicitly supported through per-session in-memory caching; reasoning storage needs the same behavior.
+- `src/search-tool.ts` and `src/search-index.ts` define `search_context` around blocks/messages and decompression commands, supporting a separate rationale-search tool for cleaner semantics.
+- `src/system-prompt.ts` centrally defines compression philosophy and is the lowest-risk place to add checkpoint-before-compress guidance without touching kernel nudge scheduling.
+- `src/index.ts` is large and actively coordinates many ACP safeguards. A wrapper entrypoint can register reasoning tools while leaving the established integration path intact.
+
+## Eliminated
+
+### E1 — Add reasoning fields directly to `CompressionState`
+
+Rejected for v1. It would require kernel-aware migration assumptions and could couple provider-independent compression internals to a Pi-only feature.
+
+### E2 — Store reasoning inside the existing `.acp.json` envelope
+
+Rejected for v1 despite being technically possible. A separate `.reasoning.json` sidecar reduces blast radius, separates lifecycles, and makes corruption/future schema migration independent of compression state.
+
+### E3 — Require a reasoning checkpoint before every `compress` call
+
+Rejected. Most compression targets are routine logs, redundant reads, or already-consumed output; checkpointing them would add noise and risk loops.
+
+### E4 — Merge reasoning results into `search_context` now
+
+Rejected for the first version. Separate search gives simpler ranking/output semantics and avoids disturbing a mature retrieval path.
+
+## Decisions
+
+1. Persist runtime reasoning to `<Pi session file>.reasoning.json` with atomic temp-file replacement.
+2. Use a per-session in-memory cache when `getSessionFile()` is unavailable.
+3. Mirror parent-session inheritance with a bounded chain walk; a child starts from inherited checkpoints and writes its own combined sidecar on first new checkpoint.
+4. Use checkpoint ids `r00001`, `r00002`, ... and an append-only state with a schema version and `nextCheckpointId`.
+5. Internal checkpoint fields are structured arrays, but tool arguments use simple text fields (newline/semicolon-separated lists) to improve reliability on non-strict local providers such as vLLM/Qwen.
+6. V1 tools are `checkpoint_reasoning` and `search_reasoning` only.
+7. `search_reasoning` gets an independent lightweight weighted keyword scorer with topic/decision/evidence emphasis.
+8. Add system-prompt guidance: checkpoint only durable rationale before compressing root-cause/architecture/decision-rich history; do not checkpoint routine logs or duplicate unchanged state.
+9. Use a thin build entrypoint wrapper to register reasoning tools without invasive edits to the large existing `src/index.ts`; keep output filename `dist/index.js` through tsup entry aliasing.
+10. Preserve the upstream package version on this feature branch.
+
+## Open Questions
+
+1. Whether custom-fork testing should force ACP auto-update off to prevent a newer upstream npm release from replacing the modified package. For now, do not alter update semantics until local-install behavior is verified.
+2. Whether a future `reasoning_status` tool is useful enough to justify permanent prompt/tool surface.
+3. Whether automatic export of selected runtime checkpoints into `TASKBOOK.md` should be added after v1 proves stable.
+4. Whether a later version should inject the newest relevant checkpoint automatically when resuming a session, or keep retrieval explicitly search-driven.
+
+## Next Steps
+
+1. Implement `src/reasoning-memory.ts` with schema, atomic persistence, fork inheritance, in-memory sessions, normalization, and weighted search.
+2. Implement `src/reasoning-tools.ts` with provider-friendly tool schemas.
+3. Add a wrapper entrypoint and update `tsup.config.ts` to continue producing `dist/index.js`.
+4. Extend `src/system-prompt.ts` with reasoning-memory tool documentation and checkpoint-before-compress policy.
+5. Add unit tests for persistence, parent inheritance, isolation, normalization, ranking, and tool-visible formatting.
+6. Run typecheck/tests/build; record actual results in the next checkpoint before opening any PR.
+
+## Completed Changes
+
+- Completed architecture inspection of state persistence, runtime ownership, tool registration, context search, system prompt, package output, and relevant tests.
+- Resolved the v1 storage question in favor of an independent reasoning sidecar.
+- Resolved the v1 search question in favor of a dedicated reasoning search tool.
+- Resolved the first compression integration as prompt-level rather than hard enforcement.
+
+---
+
 ## Checkpoint Template
 
 Copy this section for future milestones.
