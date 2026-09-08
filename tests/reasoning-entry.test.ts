@@ -87,3 +87,29 @@ test("reasoning wrapper does not add a session_start cache reset", () => {
     );
   });
 });
+
+test("reasoning prompt handler stands down for a manually wired bili proxy", () => {
+  withProxyEnvCleared(() => {
+    const wrapped = captureApi();
+    reasoningExtension(wrapped.api as never);
+    const beforeAgent = wrapped.handlers.get("before_agent_start") ?? [];
+    const reasoningHandler = beforeAgent.at(-1);
+    assert.ok(reasoningHandler, "reasoning prompt handler should be registered");
+
+    const piSessionManager = { buildContextEntries: () => [] };
+    const proxied = reasoningHandler!(
+      { systemPrompt: "BASE" },
+      {
+        sessionManager: piSessionManager,
+        model: { baseUrl: "http://127.0.0.1:8787/bili/https://example.com/v1" },
+      },
+    );
+    assert.equal(proxied, undefined, "proxy-routed Pi must not receive the local reasoning prompt");
+
+    const direct = reasoningHandler!(
+      { systemPrompt: "BASE" },
+      { sessionManager: piSessionManager, model: { baseUrl: "https://example.com/v1" } },
+    ) as { systemPrompt?: string } | undefined;
+    assert.match(direct?.systemPrompt ?? "", /REASONING MEMORY/);
+  });
+});
