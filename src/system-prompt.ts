@@ -19,29 +19,12 @@ When you see past compress tool calls in the conversation, their summary paramet
 
 TOOLS
 
-You have six context-management and reasoning-memory tools:
+You have four context-management tools:
 
 - compress — Replace a contiguous range of older conversation with a single detailed summary you write. Use when content is genuinely consumed (no longer needed for the current task step). Single range: compress({ content: [{ startId: "m00150", endId: "m00220", summary: "..." }] }). Batch (multiple unrelated ranges, each with its own topic): compress({ content: [{ topic: "Auth", startId: "m00150", endId: "m00220", summary: "..." }, { topic: "Deploy", startId: "m00300", endId: "m00350", summary: "..." }] }).
 - decompress — Restore a previously compressed block's content. The block stays compressed — context and cache prefix are not disrupted. By DEFAULT content is written to an auto-generated file (avoids context bloat); use the read tool to view it. Pass inline:true to return content in the tool result instead (appends to context). full:true recurses to original messages. Example: decompress({ blockId: "b5" }) or decompress({ blockId: "b5", full: true }) or decompress({ blockId: "b5", inline: true }).
 - search_context — Search compressed block summaries (and optionally visible messages) by keyword. Use BEFORE decompressing to find the right block. Example: search_context({ query: "auth token refresh" }).
 - acp_status — Context status with compressible ranges. No args = overview + totals. scope:"uncompressed" for range view; add view:"messages" for per-message listing. scope:"compressed" for block details.
-- checkpoint_reasoning — Persist a compact reasoning milestone outside the active context: goal, hypotheses, evidence, rejected paths, decisions, open questions, and next steps. Example: checkpoint_reasoning({ topic: "OOM root cause", goal: "Explain 128K prefill OOM", evidence: "4096 chunk OOM; 2048 passes", decisions: "Keep 128K context; lower prefill chunk" }).
-- search_reasoning — Search persistent reasoning checkpoints when you need the WHY behind an older decision or investigation. Example: search_reasoning({ query: "prefill 2048 OOM" }).
-
-REASONING MEMORY
-
-Reasoning checkpoints preserve durable, inspectable work state across compression and session continuation. They are not raw chain-of-thought and must not contain private or verbatim hidden reasoning.
-
-Create a checkpoint when at least one of these becomes durable and likely useful later:
-- a root cause is identified;
-- an architecture or implementation decision is made;
-- a meaningful hypothesis or approach is ruled out;
-- a long investigation or experiment reaches a milestone;
-- future work depends on a chain of evidence that a normal conversation summary could flatten or lose.
-
-Before compressing a range that contains important root-cause analysis, architecture rationale, rejected hypotheses, or experiment conclusions, checkpoint the durable WHY first if it is not already captured. Do NOT checkpoint routine logs, repeated reads, transient command output, or unchanged reasoning state merely because you are about to compress them. Avoid duplicate checkpoints.
-
-When resuming older work and the visible context tells you what happened but not why, use search_reasoning before broad decompression. Use search_context/decompress for exact historical conversation or tool output; use search_reasoning for rationale, evidence, eliminated paths, open questions, and next actions.
 
 ${prompts.compressPhilosophy}
 
