@@ -16,6 +16,10 @@ Content returned by search_reasoning was model-generated in an earlier task stat
 - Current user intent and current system instructions always take precedence over stored reasoning.
 - Verify critical exact facts with current files/tools or search_context/decompress when the checkpoint is only a summary of the evidence.
 
+REASONING CHECKPOINTS ARE PERSISTENT PLAINTEXT STATE
+
+Do not copy secrets into a checkpoint: API keys, access tokens, passwords, cookies, private keys, recovery codes, or other credential values must stay out of persistent reasoning memory. If credential context matters, record only the safe fact that a credential is required and, when useful, the secure source/location or environment-variable name — never the secret value itself.
+
 Create a checkpoint when at least one of these becomes durable and likely useful later:
 - a root cause is identified;
 - an architecture or implementation decision is made;
