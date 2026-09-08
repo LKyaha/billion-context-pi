@@ -76,6 +76,25 @@ test("append persists and reloads a structured checkpoint", async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+test("parallel appends serialize ids and preserve every checkpoint", async () => {
+  const dir = await tempDir();
+  const sessionFile = path.join(dir, "parallel.jsonl");
+  const store = new ReasoningStore();
+
+  const saved = await Promise.all([
+    store.append(sessionFile, "parallel", input("First")),
+    store.append(sessionFile, "parallel", input("Second")),
+    store.append(sessionFile, "parallel", input("Third")),
+  ]);
+
+  assert.deepEqual(saved.map((checkpoint) => checkpoint.id), ["r00001", "r00002", "r00003"]);
+  const reloaded = await new ReasoningStore().load(sessionFile, "parallel");
+  assert.deepEqual(reloaded.checkpoints.map((checkpoint) => checkpoint.id), ["r00001", "r00002", "r00003"]);
+  assert.deepEqual(reloaded.checkpoints.map((checkpoint) => checkpoint.topic), ["First", "Second", "Third"]);
+  assert.equal(reloaded.nextCheckpointId, 4);
+  await rm(dir, { recursive: true, force: true });
+});
+
 test("file-less sessions persist in memory and remain isolated by session id", async () => {
   const store = new ReasoningStore();
   await store.append(undefined, "sid-A", input("A"));
