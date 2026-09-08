@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { isPiHost } from "./runtime.js";
 import { OMP_UNSUPPORTED_MESSAGE } from "./omp.js";
+import { isBiliProxyBaseUrl, PROXY_STAND_DOWN_MESSAGE } from "./proxy-detect.js";
 import {
   ReasoningStore,
   type ReasoningCheckpoint,
@@ -75,9 +76,8 @@ export function makeCheckpointReasoningTool(store: ReasoningStore): ToolDefiniti
     ],
     parameters: CheckpointParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
-      if (!isPiHost(ctx.sessionManager)) {
-        return { details: undefined, content: [{ type: "text", text: OMP_UNSUPPORTED_MESSAGE }] };
-      }
+      const standDown = standDownMessage(ctx);
+      if (standDown) return { details: undefined, content: [{ type: "text", text: standDown }] };
       const args = params as CheckpointArgs;
       try {
         const checkpoint = await store.append(
@@ -114,9 +114,8 @@ export function makeSearchReasoningTool(store: ReasoningStore): ToolDefinition<t
     ],
     parameters: SearchReasoningParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
-      if (!isPiHost(ctx.sessionManager)) {
-        return { details: undefined, content: [{ type: "text", text: OMP_UNSUPPORTED_MESSAGE }] };
-      }
+      const standDown = standDownMessage(ctx);
+      if (standDown) return { details: undefined, content: [{ type: "text", text: standDown }] };
       const args = params as SearchReasoningArgs;
       try {
         const results = await store.search(
@@ -139,6 +138,13 @@ export function makeSearchReasoningTool(store: ReasoningStore): ToolDefinition<t
       }
     },
   };
+}
+
+function standDownMessage(ctx: { sessionManager: Parameters<typeof isPiHost>[0]; model?: unknown }): string | undefined {
+  if (!isPiHost(ctx.sessionManager)) return OMP_UNSUPPORTED_MESSAGE;
+  const baseUrl = (ctx.model as { baseUrl?: string } | undefined)?.baseUrl;
+  if (isBiliProxyBaseUrl(baseUrl)) return PROXY_STAND_DOWN_MESSAGE;
+  return undefined;
 }
 
 export function parseReasoningList(value: string | undefined, splitCommas = false): string[] {
