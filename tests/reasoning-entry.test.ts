@@ -39,6 +39,7 @@ test("default reasoning entry registers ACP and reasoning tools", () => {
     const { api, tools } = captureApi();
     reasoningExtension(api as never);
     const names = tools.map((tool) => tool.name);
+    assert.equal(new Set(names).size, names.length);
     assert.ok(names.includes("compress"));
     assert.ok(names.includes("decompress"));
     assert.ok(names.includes("search_context"));
