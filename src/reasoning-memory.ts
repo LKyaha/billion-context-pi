@@ -5,6 +5,7 @@ import { readParentSessionPath } from "./state.js";
 
 const REASONING_SUFFIX = ".reasoning.json";
 const MAX_PARENT_CHAIN_DEPTH = 8;
+const RECENT_DUPLICATE_SCAN = 32;
 
 export interface ReasoningCheckpoint {
   id: string;
@@ -30,6 +31,11 @@ export interface ReasoningCheckpointInput {
   openQuestions?: string[];
   nextSteps?: string[];
   tags?: string[];
+}
+
+export interface ReasoningAppendResult {
+  checkpoint: ReasoningCheckpoint;
+  created: boolean;
 }
 
 export interface ReasoningState {
@@ -127,6 +133,14 @@ export class ReasoningStore {
     sessionId: string,
     input: ReasoningCheckpointInput,
   ): Promise<ReasoningCheckpoint> {
+    return (await this.appendWithStatus(sessionFile, sessionId, input)).checkpoint;
+  }
+
+  async appendWithStatus(
+    sessionFile: string | undefined,
+    sessionId: string,
+    input: ReasoningCheckpointInput,
+  ): Promise<ReasoningAppendResult> {
     const normalized = normalizeCheckpointInput(input);
     if (!normalized.topic) throw new Error("Reasoning checkpoint topic must not be empty.");
     if (!normalized.goal) throw new Error("Reasoning checkpoint goal must not be empty.");
@@ -135,6 +149,16 @@ export class ReasoningStore {
     const release = await this.acquireAppendLock(key);
     try {
       const state = await this.load(sessionFile, sessionId);
+      const duplicate = findRecentDuplicate(state.checkpoints, normalized);
+      if (duplicate) {
+        logInfo("reasoning", {
+          event: "duplicate-skip",
+          checkpointId: duplicate.id,
+          topic: duplicate.topic,
+        });
+        return { checkpoint: duplicate, created: false };
+      }
+
       const checkpoint: ReasoningCheckpoint = {
         id: formatCheckpointId(state.nextCheckpointId),
         createdAt: Date.now(),
@@ -154,7 +178,7 @@ export class ReasoningStore {
         checkpoints: [...state.checkpoints, checkpoint],
       };
       await this.save(nextState, sessionFile, sessionId);
-      return checkpoint;
+      return { checkpoint, created: true };
     } finally {
       release();
     }
@@ -254,6 +278,34 @@ export class ReasoningStore {
     });
     return undefined;
   }
+}
+
+function findRecentDuplicate(
+  checkpoints: readonly ReasoningCheckpoint[],
+  input: ReasoningCheckpointInput,
+): ReasoningCheckpoint | undefined {
+  const start = Math.max(0, checkpoints.length - RECENT_DUPLICATE_SCAN);
+  for (let index = checkpoints.length - 1; index >= start; index--) {
+    const checkpoint = checkpoints[index];
+    if (checkpoint && checkpointMatchesInput(checkpoint, input)) return checkpoint;
+  }
+  return undefined;
+}
+
+function checkpointMatchesInput(checkpoint: ReasoningCheckpoint, input: ReasoningCheckpointInput): boolean {
+  return checkpoint.topic === input.topic
+    && checkpoint.goal === input.goal
+    && arraysEqual(checkpoint.hypotheses, input.hypotheses ?? [])
+    && arraysEqual(checkpoint.evidence, input.evidence ?? [])
+    && arraysEqual(checkpoint.eliminated, input.eliminated ?? [])
+    && arraysEqual(checkpoint.decisions, input.decisions ?? [])
+    && arraysEqual(checkpoint.openQuestions, input.openQuestions ?? [])
+    && arraysEqual(checkpoint.nextSteps, input.nextSteps ?? [])
+    && arraysEqual(checkpoint.tags, input.tags ?? []);
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function searchReasoning(
