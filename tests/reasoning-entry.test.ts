@@ -61,3 +61,29 @@ test("named createAcpExtension remains reasoning-free", () => {
     assert.ok(!names.includes("search_reasoning"));
   });
 });
+
+test("reasoning wrapper does not add a session_start cache reset", () => {
+  withProxyEnvCleared(() => {
+    const base = captureApi();
+    createAcpExtension()(base.api as never);
+
+    const wrapped = captureApi();
+    reasoningExtension(wrapped.api as never);
+
+    const baseSessionStarts = base.handlers.get("session_start") ?? [];
+    const wrappedSessionStarts = wrapped.handlers.get("session_start") ?? [];
+    assert.equal(
+      wrappedSessionStarts.length,
+      baseSessionStarts.length,
+      "reasoning wrapper must not add a session_start handler that clears in-memory reasoning state",
+    );
+
+    const baseBeforeAgent = base.handlers.get("before_agent_start") ?? [];
+    const wrappedBeforeAgent = wrapped.handlers.get("before_agent_start") ?? [];
+    assert.equal(
+      wrappedBeforeAgent.length,
+      baseBeforeAgent.length + 1,
+      "reasoning wrapper still adds its reasoning-memory prompt handler",
+    );
+  });
+});
