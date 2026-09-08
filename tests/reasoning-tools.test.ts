@@ -3,14 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { defaultPrompts } from "acp-kernel";
 import { ReasoningStore } from "../src/reasoning-memory.js";
+import { appendReasoningMemoryPrompt } from "../src/reasoning-prompt.js";
 import {
   makeCheckpointReasoningTool,
   makeSearchReasoningTool,
   parseReasoningList,
 } from "../src/reasoning-tools.js";
-import { buildAcpSystemPrompt } from "../src/system-prompt.js";
 
 function fakeCtx(sessionFile: string) {
   return {
@@ -109,8 +108,9 @@ test("search_reasoning reports no match without dumping unrelated checkpoints", 
   await rm(dir, { recursive: true, force: true });
 });
 
-test("ACP system prompt documents reasoning memory without requiring checkpoints for routine compression", () => {
-  const prompt = buildAcpSystemPrompt(defaultPrompts);
+test("reasoning prompt is additive and does not require checkpoints for routine compression", () => {
+  const prompt = appendReasoningMemoryPrompt("BASE ACP PROMPT");
+  assert.match(prompt, /^BASE ACP PROMPT/);
   assert.match(prompt, /checkpoint_reasoning/);
   assert.match(prompt, /search_reasoning/);
   assert.match(prompt, /Before compressing a range that contains important root-cause analysis/);
