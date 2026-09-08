@@ -30,10 +30,16 @@ Extend `billion-context-pi` with a Pi-only, provider-independent reasoning-memor
 - `<session>.reasoning.json` — independent reasoning sidecar with atomic writes.
 - Pi parent-session inheritance — child/fork sessions inherit reasoning checkpoints and continue checkpoint ids.
 - File-less/in-memory session support — checkpoints remain cached per session id.
-- Weighted reasoning search across topic, goal, hypotheses, evidence, eliminated paths, decisions, open questions, next steps, tags, filenames, and numeric values.
+- Per-session append serialization prevents concurrent checkpoint-id/write races.
+- Exact recent duplicate checkpoints are suppressed so model/tool retries do not grow the ledger indefinitely.
+- Weighted reasoning search covers topic, goal, hypotheses, evidence, eliminated paths, decisions, open questions, next steps, tags, filenames, and numeric values.
 - Reasoning-aware prompt guidance — checkpoint durable WHY before compressing decision-rich/root-cause history, but do not checkpoint routine logs or unchanged state.
+- Retrieved checkpoints are explicitly historical model-generated metadata, not current user instructions.
+- Persistent checkpoint text reuses ACP summary sanitization for dense literal `\\uXXXX` corruption and warns on unverifiable user-quote claims.
 - Provider-friendly tool schema — list-like fields are simple text rather than nested arrays to reduce failures on non-strict Qwen/vLLM-style tool calling.
 - Thin wrapper entrypoint — the original named `createAcpExtension()` remains reasoning-free; the package default entry adds reasoning tools/prompt without invasive changes to `src/index.ts`.
+- `BILLION_CONTEXT_PROXY`, manually wired `/bili/` base URLs, OMP refusal behavior, and `enabled:false` are respected by the reasoning layer.
+- Reasoning checkpoints are plaintext persistent state; prompts explicitly forbid storing credential/secret values.
 
 ## Current Architecture
 
@@ -61,11 +67,11 @@ Runtime reasoning memory and this taskbook are intentionally separate:
 
 ## Validation Status
 
-Tests have been added for persistence, reload, in-memory isolation, parent/grandparent inheritance, checkpoint-id continuation, normalization, numeric/Chinese-friendly search, tool-visible checkpoint/search behavior, concurrent appends, wrapper-vs-named-factory isolation, and lifecycle registration.
+Tests have been added for persistence/reload, in-memory isolation, parent/grandparent inheritance, checkpoint-id continuation, normalization, numeric/CJK-friendly search, concurrent appends, exact duplicate suppression, checkpoint/search tool behavior, Unicode corruption sanitization, wrapper-vs-named-factory isolation, lifecycle registration, manual bili-proxy stand-down, and historical prompt guardrails.
 
-**Important:** GitHub Actions has not actually run on this fork yet. The Actions run list was empty after opening Draft PR #1. Therefore `npm run typecheck`, `npm test`, and `npm run build` must **not** be reported as passing until they are run in a real environment.
+**Important:** GitHub Actions has not actually run on this fork. The PR/branch currently has no workflow runs or status checks. An isolated clone/build attempt was also blocked because the execution container cannot resolve external GitHub DNS. Therefore `npm run typecheck`, `npm test`, and `npm run build` must **not** be reported as passing until they are run in a real checkout.
 
-GitHub Issues is disabled on this fork, so issue creation required by the upstream development convention is unavailable. Relevant implementation/review notes are kept in this taskbook and the Draft PR instead.
+GitHub Issues is disabled on this fork, so issue creation required by the upstream development convention is unavailable. Relevant implementation/review notes are kept in this taskbook and Draft PR #1 instead.
 
 ## Upstream Sync Policy
 
@@ -255,15 +261,6 @@ Not justified yet. Installation method should be verified first; avoid unrelated
 4. Should a later version automatically retrieve a recent relevant checkpoint when resuming, or stay explicitly search-driven?
 5. How reliably do local Qwen/DeepSeek/GLM models follow the checkpoint-before-compress policy under non-strict tool calling?
 
-## Next Steps
-
-1. Obtain real `npm run typecheck`, `npm test`, and `npm run build` results.
-2. Fix any type/build/test failures before adding more surface area.
-3. Install the branch build into Pi and run a practical long-session scenario.
-4. Test with at least one non-strict local provider/model, especially Qwen/vLLM-style tool calling.
-5. Verify parent/fork reasoning recovery in a real Pi session.
-6. Only after validation, consider documentation polish and whether the Draft PR is ready for review.
-
 ## Completed Changes
 
 - Implemented reasoning sidecar persistence, normalization, weighted search, parent inheritance, and in-memory session support.
@@ -275,6 +272,99 @@ Not justified yet. Installation method should be verified first; avoid unrelated
 - Added an entrypoint regression test guarding against reintroducing a global reasoning cache reset.
 - Opened Draft PR #1; kept it unmerged because actual CI has not run.
 - Compressed this taskbook and added a rolling `Current State` section to reduce future recovery cost.
+
+---
+
+# Checkpoint 0005 — Compatibility, Pollution Resistance, and Ledger Growth Guards
+
+**Date:** 2026-09-08  
+**Branch:** `2026-09-08_reasoning-memory`
+
+## Goal
+
+Make reasoning memory behave like a first-class ACP companion under real Pi extension semantics and local-model failure modes, without letting the new persistent channel become a new source of context pollution or unbounded duplicate growth.
+
+## Hypotheses
+
+### H1 — A second `before_agent_start` handler is safe only if Pi chains prompt mutations
+
+The thin wrapper approach depends on the reasoning handler receiving the ACP-modified system prompt, not the original prompt.
+
+### H2 — Every ACP stand-down path must also gate reasoning memory
+
+If base ACP yields to the generic billion-context wire proxy but the reasoning layer keeps injecting tools/prompt or writing local state, the package presents two incompatible context owners.
+
+### H3 — Persistent reasoning needs the same corruption defenses as persistent ACP summaries
+
+Small/non-strict models that can emit dense literal `\\uXXXX` corruption or unverifiable user-quote claims in compression summaries can do the same in checkpoint fields. Persisting those errors would make them durable and searchable.
+
+### H4 — Exact retry duplicates should not consume checkpoint ids or sidecar space
+
+Local/non-strict models may repeat an identical tool call. A durable ledger should treat a byte-equivalent normalized milestone as already captured rather than append it again.
+
+## Evidence
+
+- Pi core `ExtensionRunner.emitBeforeAgentStart()` maintains `currentSystemPrompt`, creates each subsequent event from that current value, and replaces it only when a handler returns a new `systemPrompt`. This confirms the base ACP handler and reasoning handler compose sequentially.
+- Mainline `billion-context-pi` already detects manually wired `/bili/https://...` base URLs through `isBiliProxyBaseUrl`; reasoning originally only checked the environment-variable path.
+- Mainline `compress-tool.ts` already applies `sanitizeSummary`, dense Unicode-escape normalization, and unverifiable-user-quote diagnostics because small models had produced self-reinforcing corrupt summaries.
+- Reasoning checkpoints are stored outside the live context and can outlive the turn that created them, increasing the cost of persistent corruption or accidental secret capture.
+- Fork PR #1 still has no GitHub Actions runs/status checks, and the isolated execution container cannot resolve `github.com`, so test execution remains unavailable in the current environment.
+
+## Eliminated
+
+### E1 — Assume multiple Pi system-prompt handlers overwrite each other
+
+Ruled out by Pi core source. The event runner chains `currentSystemPrompt` sequentially.
+
+### E2 — Let reasoning stay active behind a manually wired billion-context proxy
+
+Rejected. Reasoning prompt and both tools now stand down for `/bili/` proxy base URLs, matching ACP ownership semantics; checkpoint calls in that mode do not create local reasoning state.
+
+### E3 — Build a separate reasoning-specific Unicode sanitizer
+
+Rejected. Reuse the mainline ACP sanitizer so both persistent channels share the same corruption policy.
+
+### E4 — Append every identical checkpoint retry
+
+Rejected. Exact normalized duplicates among the recent checkpoint window are returned as already captured and do not advance `nextCheckpointId`.
+
+## Decisions
+
+1. Keep the two-handler prompt architecture; Pi core source confirms it is valid.
+2. Mirror both `BILLION_CONTEXT_PROXY` and manual `/bili/` stand-down semantics in reasoning behavior.
+3. Treat `search_reasoning` output as historical model-generated metadata: never current user instructions; current user/system instructions win.
+4. Reuse `sanitizeSummary` on every persisted reasoning field; log unverifiable user-quote claims without silently rewriting their meaning.
+5. Suppress exact recent duplicate checkpoints and return explicit `Duplicate not added` feedback to the model.
+6. Treat reasoning sidecars as persistent plaintext. Never checkpoint credential values such as API keys, passwords, cookies, tokens, private keys, or recovery codes; record only safe references such as an environment-variable name or secure location when needed.
+7. Do not add automatic reasoning compaction yet. First validate V1 in real Pi usage; only add higher-tier reasoning compaction if actual checkpoint growth/search cost justifies it.
+
+## Open Questions
+
+1. What failures, if any, appear under real `npm run typecheck`, `npm test`, and `npm run build`?
+2. Does Qwen/vLLM reliably follow checkpoint-before-compress guidance without over-checkpointing?
+3. After several hundred real checkpoints, is exact duplicate suppression enough, or should a later V2 add topic supersession / T1→T2 reasoning distillation?
+4. Should a future `reasoning_status` expose checkpoint count/sidecar size without expanding the model prompt surface by default?
+5. Should session shutdown drop disk-backed cache entries for memory hygiene while preserving file-less session semantics until the process/session truly ends?
+
+## Next Steps
+
+1. Execute the required typecheck/test/build suite in a real checkout or enable GitHub Actions on the fork.
+2. Fix any actual failures before adding further feature surface.
+3. Install the branch build into Pi and run a practical long-session compression test.
+4. Test one non-strict local provider (preferably Qwen/vLLM) for checkpoint tool-call formatting, duplicate retry behavior, and Unicode sanitization.
+5. Verify a real Pi fork/clone inherits reasoning and can recover an older decision with `search_reasoning` after ACP compression.
+6. Keep Draft PR #1 unmerged until the above validation is complete.
+
+## Completed Changes
+
+- Added manual bili-proxy stand-down to reasoning prompt and tools.
+- Added proxy regression tests proving no local reasoning checkpoint is written when the wire proxy owns context.
+- Confirmed Pi's sequential `before_agent_start` system-prompt chaining from upstream core source.
+- Added historical-metadata guardrails against instruction pollution from retrieved checkpoints.
+- Added exact duplicate checkpoint suppression with stable id/count behavior and model-visible duplicate feedback.
+- Reused ACP summary sanitization for persistent reasoning fields and added Unicode-corruption coverage.
+- Added plaintext-secret persistence warnings to the reasoning prompt.
+- Updated Draft PR #1 description to reflect the actual implementation and unvalidated test status.
 
 ---
 
