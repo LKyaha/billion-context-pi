@@ -42,33 +42,47 @@ test("parseReasoningList accepts bullets, semicolons, JSON arrays, and tag comma
   );
 });
 
-test("checkpoint_reasoning persists state and search_reasoning retrieves rationale", async () => {
+test("checkpoint_reasoning persists state, skips duplicates, and search_reasoning retrieves rationale", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "reasoning-tools-"));
   const sessionFile = path.join(dir, "session.jsonl");
   const ctx = fakeCtx(sessionFile);
   const store = new ReasoningStore();
   const checkpointTool = makeCheckpointReasoningTool(store);
   const searchTool = makeSearchReasoningTool(store);
+  const checkpointArgs = {
+    topic: "Qwen 128K OOM",
+    goal: "Find the source of the prefill memory spike",
+    hypotheses: "prefill temporary tensors cause the peak; KV cache growth",
+    evidence: "4096 chunk OOM\n2048 chunk passes",
+    eliminated: "KV cache is the primary cause — allocation does not grow with the spike",
+    decisions: "Keep 128K context; lower prefill floor to 2048",
+    openQuestions: "Does 1024 reduce memory enough to justify throughput loss?",
+    nextSteps: "Benchmark 1024 / 2048 / 4096",
+    tags: "Qwen3.8, scheduler.py, prefill",
+  };
 
   const saved = await checkpointTool.execute(
     "tc1",
-    {
-      topic: "Qwen 128K OOM",
-      goal: "Find the source of the prefill memory spike",
-      hypotheses: "prefill temporary tensors cause the peak; KV cache growth",
-      evidence: "4096 chunk OOM\n2048 chunk passes",
-      eliminated: "KV cache is the primary cause — allocation does not grow with the spike",
-      decisions: "Keep 128K context; lower prefill floor to 2048",
-      openQuestions: "Does 1024 reduce memory enough to justify throughput loss?",
-      nextSteps: "Benchmark 1024 / 2048 / 4096",
-      tags: "Qwen3.8, scheduler.py, prefill",
-    },
+    checkpointArgs,
     undefined,
     undefined,
     ctx as never,
   );
   assert.match(resultText(saved), /r00001/);
   assert.match(resultText(saved), /Qwen 128K OOM/);
+
+  const duplicate = await checkpointTool.execute(
+    "tc1-retry",
+    checkpointArgs,
+    undefined,
+    undefined,
+    ctx as never,
+  );
+  assert.match(resultText(duplicate), /r00001/);
+  assert.match(resultText(duplicate), /Duplicate not added/);
+  const afterDuplicate = await store.load(sessionFile, "reasoning-tool-session");
+  assert.equal(afterDuplicate.checkpoints.length, 1);
+  assert.equal(afterDuplicate.nextCheckpointId, 2);
 
   const found = await searchTool.execute(
     "tc2",
