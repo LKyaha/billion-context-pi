@@ -209,6 +209,7 @@ function formatSearchResults(query: string, results: readonly ReasoningSearchRes
     const checkpoint = result.checkpoint;
     lines.push("", `${checkpoint.id} score:${result.score.toFixed(1)} "${checkpoint.topic}"`);
     lines.push(`  Goal: ${truncate(checkpoint.goal, 320)}`);
+    appendList(lines, "Hypotheses", checkpoint.hypotheses);
     appendList(lines, "Decisions", checkpoint.decisions);
     appendList(lines, "Evidence", checkpoint.evidence);
     appendList(lines, "Eliminated", checkpoint.eliminated);
