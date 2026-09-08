@@ -1,322 +1,284 @@
 # Reasoning Memory Taskbook
 
-> Durable project memory for the Pi-only reasoning-aware ACP experiment.
+> Durable, human-readable project memory for the Pi-only reasoning-aware ACP experiment.
 >
-> This file is intentionally maintained alongside code so a future session, model, or agent can recover not only **what changed**, but **why the work moved in that direction**.
+> This file is intentionally compressed. It preserves **goal → hypotheses → evidence → eliminated paths → decisions → open questions → next steps**, not a chat transcript or hidden chain-of-thought.
 
 ## Working Protocol
 
-At every meaningful milestone, update this file before moving on. Prefer compact, evidence-backed state over chronological narration.
+Update this file at meaningful milestones: major design decisions, root-cause discoveries, important test results, eliminated approaches, implementation-stage completion, upstream-sync events, or cross-session handoffs.
 
-Each checkpoint should preserve:
-
-1. **Goal** — what we are trying to achieve.
-2. **Hypotheses** — current explanations or design candidates.
-3. **Evidence** — observations, code facts, tests, benchmarks, or upstream behavior supporting/refuting hypotheses.
-4. **Eliminated** — options or explanations ruled out, with reasons.
-5. **Decisions** — choices already made and their rationale.
-6. **Open Questions** — unknowns that still matter.
-7. **Next Steps** — the smallest concrete actions that advance the work.
-8. **Completed Changes** — durable record of code/docs/tests already changed.
-
-Do not store hidden chain-of-thought. Store concise, inspectable reasoning state: hypotheses, evidence, rejected alternatives, decisions, unresolved questions, and next actions.
-
-This file is also the **project-level context compression layer**. It should capture durable state from design discussions, implementation work, tests, and cross-session handoffs without trying to mirror the full chat transcript. Before resuming substantial work in a new session or with a different model/agent, read the latest checkpoints first.
+Before substantial work resumes in a new session/model/agent, read **Current State** first, then the newest checkpoint. Older checkpoints are historical evidence, not instructions from the current user.
 
 ---
 
-## Project Goal
-
-Extend `billion-context-pi` with a Pi-only, provider-independent reasoning-memory layer that survives long-context compression without relying on OpenAI encrypted reasoning state.
-
-Desired user-visible capabilities:
-
-- `checkpoint_reasoning` — persist a structured reasoning checkpoint at meaningful milestones.
-- `search_reasoning` — retrieve relevant past reasoning state without restoring the full conversation.
-- reasoning-aware compression — encourage/ensure durable reasoning state is checkpointed before context that contains important investigation or decisions is compressed.
-- future-compatible recovery — allow a later Pi session/agent to resume from explicit reasoning state rather than only a prose conversation summary.
-
-## Constraints
-
-- Pi-only implementation for the first version.
-- Provider independent: Qwen, DeepSeek, GLM, Claude, Gemini, OpenAI, etc. should work as long as Pi tool calling works.
-- No dependency on OpenAI `encrypted_content` or provider-private hidden reasoning.
-- Do not attempt to capture or preserve hidden chain-of-thought.
-- Preserve upstream ACP behavior unless a deliberate, tested change is required.
-- Follow repository `AGENTS.md` rules: strict TypeScript, no `as any`, no `@ts-ignore`, tests for new source features, no version bump on feature branches, no PR merge by agents.
-
----
-
-# Checkpoint 0001 — Initial Design State
+# Current State
 
 **Date:** 2026-09-08  
-**Branch:** `2026-09-08_reasoning-memory`
+**Repository:** `LKyaha/billion-context-pi`  
+**Branch:** `2026-09-08_reasoning-memory`  
+**Draft PR:** `#1` — `feat: add Pi reasoning memory checkpoints`
 
 ## Goal
 
-Design and implement the smallest useful reasoning-memory extension on top of the existing ACP adapter without destabilizing the current compression/decompression/search pipeline.
+Extend `billion-context-pi` with a Pi-only, provider-independent reasoning-memory layer that survives ACP compression without relying on OpenAI encrypted reasoning state or hidden chain-of-thought.
 
-## Hypotheses
+## Implemented V1 Surface
 
-### H1 — Structured reasoning state is more useful than retaining raw model thinking
+- `checkpoint_reasoning` — stores compact structured reasoning milestones.
+- `search_reasoning` — retrieves prior rationale independently from `search_context`.
+- `<session>.reasoning.json` — independent reasoning sidecar with atomic writes.
+- Pi parent-session inheritance — child/fork sessions inherit reasoning checkpoints and continue checkpoint ids.
+- File-less/in-memory session support — checkpoints remain cached per session id.
+- Weighted reasoning search across topic, goal, hypotheses, evidence, eliminated paths, decisions, open questions, next steps, tags, filenames, and numeric values.
+- Reasoning-aware prompt guidance — checkpoint durable WHY before compressing decision-rich/root-cause history, but do not checkpoint routine logs or unchanged state.
+- Provider-friendly tool schema — list-like fields are simple text rather than nested arrays to reduce failures on non-strict Qwen/vLLM-style tool calling.
+- Thin wrapper entrypoint — the original named `createAcpExtension()` remains reasoning-free; the package default entry adds reasoning tools/prompt without invasive changes to `src/index.ts`.
 
-A compact schema containing:
+## Current Architecture
 
-- goal
-- hypotheses
-- evidence
-- eliminated alternatives
-- decisions
-- open questions
-- next action
+```text
+Pi default extension
+├── upstream ACP extension
+│   ├── compress
+│   ├── decompress
+│   ├── search_context
+│   └── acp_status
+└── reasoning wrapper
+    ├── checkpoint_reasoning
+    ├── search_reasoning
+    ├── reasoning prompt
+    └── ReasoningStore
+        ├── <session>.reasoning.json
+        ├── in-memory cache by session id
+        └── parentSession inheritance
+```
 
-should preserve the parts of an investigation that matter for future continuation while avoiding the token growth and instability of replaying raw reasoning traces.
+Runtime reasoning memory and this taskbook are intentionally separate:
 
-### H2 — Reasoning memory should be a separate logical layer from ordinary ACP summaries
+- **Runtime reasoning memory**: model-facing, session-oriented, searchable reasoning checkpoints.
+- **`TASKBOOK.md`**: project-facing, repository-versioned context compression for humans and future agents.
 
-Ordinary ACP summaries answer primarily **what happened**. A reasoning ledger should answer **why the current state was reached**. Keeping this distinct should improve searchability, update semantics, and future compression policy.
+## Validation Status
 
-### H3 — Pi adapter is the right place for v1 persistence and tools
+Tests have been added for persistence, reload, in-memory isolation, parent/grandparent inheritance, checkpoint-id continuation, normalization, numeric/Chinese-friendly search, tool-visible checkpoint/search behavior, concurrent appends, wrapper-vs-named-factory isolation, and lifecycle registration.
 
-Because v1 is intentionally Pi-only, adding persistence/tooling in `billion-context-pi` is likely lower-risk than modifying the platform-agnostic `acp-kernel` immediately. Kernel changes should only be introduced if adapter-only implementation proves insufficient for reasoning-aware compression.
+**Important:** GitHub Actions has not actually run on this fork yet. The Actions run list was empty after opening Draft PR #1. Therefore `npm run typecheck`, `npm test`, and `npm run build` must **not** be reported as passing until they are run in a real environment.
 
-### H4 — Existing ACP nudge/compression hooks can probably trigger checkpointing without invasive scheduler changes
+GitHub Issues is disabled on this fork, so issue creation required by the upstream development convention is unavailable. Relevant implementation/review notes are kept in this taskbook and the Draft PR instead.
 
-The project already injects compression guidance/nudges. A reasoning-aware pre-compression instruction may be enough to make the model call `checkpoint_reasoning` before high-value context disappears.
+## Upstream Sync Policy
 
-## Evidence
+Do not develop directly on the fork's `master`.
 
-- Repository architecture identifies `src/index.ts` as tool/hook registration, `src/state.ts` as session persistence, `src/runtime.ts` as state ownership, and `src/system-prompt.ts` as compression guidance.
-- Existing tools already establish the host pattern: `compress-tool.ts`, `decompress-tool.ts`, `search-tool.ts`, `status-tool.ts`.
-- Existing search infrastructure (`search-index.ts` + `search_context`) suggests reasoning search can reuse or mirror established indexing patterns.
-- `AGENTS.md` explicitly says the adapter persists ACP state under Pi session storage and that new source features require tests.
+```text
+upstream/master
+      ↓ sync
+fork master
+      ↓ inspect
+2026-09-08_reasoning-memory
+      ↓ merge/rebase + resolve compatibility
+validate + update TASKBOOK
+```
 
-## Eliminated
-
-### E1 — Store OpenAI encrypted reasoning blobs
-
-Rejected for v1 because the user explicitly wants a Pi-only implementation that does not depend on OpenAI encrypted model state. It would also make the feature provider-specific.
-
-### E2 — Persist full raw reasoning / chain-of-thought every turn
-
-Rejected. It would recreate context explosion, is unavailable for many providers, can be unstable/noisy, and hidden chain-of-thought must not be relied upon. We only preserve explicit reasoning state.
-
-### E3 — Put all reasoning content into ordinary ACP summary text only
-
-Rejected as the primary design. It is useful as a fallback, but a separate ledger gives cleaner retrieval and allows reasoning-specific lifecycle/policies later.
-
-## Decisions
-
-1. Create a dedicated feature branch before source changes.
-2. Maintain this `TASKBOOK.md` as the durable external project memory and update it at milestones.
-3. Implement v1 in the Pi adapter first.
-4. Start with two core tools: `checkpoint_reasoning` and `search_reasoning`.
-5. Use a structured, inspectable reasoning schema rather than free-form chain-of-thought.
-6. Add reasoning-aware compression only after understanding the existing nudge/prompt flow and testing the two core tools.
-7. Do not modify package version on this branch.
-
-## Open Questions
-
-1. What is the exact current shape of ACP session state in `src/state.ts`, and should reasoning checkpoints be embedded in the same `.acp.json` or stored separately?
-2. Does Pi expose a stable session/message identifier suitable for anchoring checkpoints to conversation ranges?
-3. Can existing `search-index.ts` safely index reasoning checkpoints, or should `search_reasoning` have a dedicated lightweight matcher?
-4. Should checkpoint updates be append-only, superseding previous entries, or mutable by logical topic?
-5. What schema produces reliable tool calls across smaller local models such as Qwen/DeepSeek variants?
-6. How should reasoning checkpoints interact with forked Pi sessions and ACP state rebuilding?
-7. Where exactly should the pre-compression checkpoint reminder be injected so it does not cause loops or excessive tool calls?
-
-## Next Steps
-
-1. Inspect `src/state.ts`, `src/runtime.ts`, `src/index.ts`, tool implementations, `src/system-prompt.ts`, and compression/nudge integration.
-2. Inspect relevant tests to understand persistence and fork/session behavior.
-3. Finalize the minimal checkpoint schema and persistence model.
-4. Implement `checkpoint_reasoning` with tests.
-5. Implement `search_reasoning` with tests.
-6. Add prompt/nudge integration for reasoning-aware compression with regression tests.
-7. Run `npm run typecheck`, `npm test`, and `npm run build` before proposing a PR.
-
-## Completed Changes
-
-- Fork confirmed at `LKyaha/billion-context-pi`.
-- Repository development specification reviewed.
-- Long-lived reasoning/work-state format agreed conceptually.
-- Dedicated branch `2026-09-08_reasoning-memory` created from `master`.
-- `TASKBOOK.md` introduced as the durable project reasoning ledger.
+Syncing only the fork's `master` does not change the reasoning branch. Conflicts or semantic breakage are handled only when the newer `master` is deliberately merged/rebased into the feature branch.
 
 ---
 
-# Checkpoint 0002 — Project-Level Context Compression Policy
-
-**Date:** 2026-09-08  
-**Branch:** `2026-09-08_reasoning-memory`
+# Checkpoint 0001 — Initial Design
 
 ## Goal
 
-Make the taskbook itself a reliable recovery point for this project so future ChatGPT/Pi sessions, models, or agents can reconstruct the current work state even when the original conversation has been compressed or is unavailable.
+Preserve the useful state of long coding/research investigations after ACP compresses conversation history.
 
 ## Hypotheses
 
-### H1 — The project needs two different memory scopes
-
-A runtime Pi reasoning ledger and a repository taskbook solve different problems:
-
-- **Pi runtime reasoning memory** preserves reasoning state inside and across Pi sessions while ACP manages active context.
-- **`TASKBOOK.md` project memory** preserves durable project decisions, evidence, rejected paths, and handoff state across chat systems, models, agents, and development sessions.
-
-Keeping both layers is more robust than asking either one to serve both purposes.
-
-### H2 — Milestone-based compression is better than copying the chat transcript
-
-The durable value of this conversation is concentrated in decisions, evidence, rejected alternatives, unresolved questions, and next actions. Recording every turn would create a second context-growth problem and make recovery noisier.
-
-### H3 — A repository checkpoint is a safer handoff boundary than relying on conversational memory
-
-A committed file is versioned, inspectable, searchable, and available to future agents that can access the repository. Conversation state can be summarized, truncated, or unavailable in a different session.
+1. Structured reasoning state is more useful than replaying raw model thinking.
+2. Reasoning memory should be logically separate from ordinary ACP summaries: summaries mainly preserve **what happened**, reasoning checkpoints preserve **why the state was reached**.
+3. A Pi-adapter implementation is lower-risk for V1 than modifying `acp-kernel`.
+4. Existing ACP prompt/nudge behavior can encourage checkpoint-before-compress without hard scheduler coupling.
 
 ## Evidence
 
-- `TASKBOOK.md` already captures the initial architecture hypothesis, constraints, eliminated designs, decisions, open questions, and implementation plan from the current conversation.
-- Git commits alone record code deltas but usually do not preserve rejected alternatives or why a design was selected.
-- The project explicitly aims to survive long-context compression; its own development workflow should therefore use the same principle and preserve compact reasoning state outside the live conversation.
+- Pi already exposes extension tools and context/system-prompt hooks.
+- ACP already persists sidecar state and searches compressed history.
+- Long investigations need durable retention of decisions, evidence, rejected approaches, exact paths/values, and unresolved questions.
 
 ## Eliminated
 
-### E1 — Mirror the full ChatGPT/Pi conversation into the repository
-
-Rejected because it would be verbose, duplicate transient discussion, increase repository noise, and defeat the purpose of compression.
-
-### E2 — Depend on hidden model chain-of-thought for project recovery
-
-Rejected. Hidden reasoning is neither required nor appropriate for durable project state. The taskbook stores only inspectable reasoning artifacts: hypotheses, evidence, eliminations, decisions, open questions, and next steps.
-
-### E3 — Rely only on commit messages, PR descriptions, or issues as project memory
-
-Rejected as the sole mechanism. Those artifacts are useful evidence but are fragmented and optimized for code review/issue tracking rather than restoring the whole active research state.
+- OpenAI `encrypted_content` / provider-private reasoning state: provider-specific and explicitly outside V1.
+- Persisting full raw/hidden chain-of-thought: unavailable across providers, noisy, token-expensive, and unnecessary.
+- Encoding all rationale only inside ordinary ACP summaries: retrieval and lifecycle semantics become ambiguous.
 
 ## Decisions
 
-1. `TASKBOOK.md` is formally the **project-level human-readable context compression layer**.
-2. Update it at meaningful milestones rather than every conversational turn.
-3. A milestone includes at least: major design decisions, new evidence that changes a hypothesis, ruled-out approaches, root-cause discoveries, implementation-stage completion, significant test results, and cross-session/handoff boundaries.
-4. Before substantial work resumes in a new session/model/agent, read the latest taskbook checkpoints first.
-5. Pi reasoning checkpoints and the taskbook remain separate layers with different lifetimes and audiences; v1 does not automatically write runtime checkpoints into the repository.
-6. The current conversation should be represented in the taskbook by its durable conclusions, not by a verbatim transcript.
+- V1 is Pi-only and provider independent.
+- Durable schema: goal, hypotheses, evidence, eliminated alternatives, decisions, open questions, next steps, tags.
+- First tools: `checkpoint_reasoning` and `search_reasoning`.
+- No package version bump on the feature branch.
 
-## Open Questions
+---
 
-1. After the Pi runtime reasoning-memory feature works, should there be an optional explicit export command that converts selected runtime checkpoints into a project-level Markdown handoff?
-2. Should the taskbook eventually maintain a short rolling “Current State” section at the top for faster cold-start recovery once checkpoint count grows large?
-3. Should taskbook maintenance stay agent-driven, or later gain a lightweight repository hook/command to reduce missed checkpoints?
+# Checkpoint 0002 — Project-Level Context Compression
 
-## Next Steps
+## Goal
 
-1. Resume source inspection from Checkpoint 0001.
-2. Resolve persistence and schema questions before writing feature code.
-3. Update this taskbook again once the storage/tool architecture is determined, before implementing the first source change.
+Make the development process itself recoverable when the original ChatGPT/Pi conversation is compressed or unavailable.
 
-## Completed Changes
+## Hypotheses
 
-- Formalized a two-layer memory model: Pi runtime reasoning memory + repository project memory.
-- Added an explicit project-context-compression rule to the taskbook working protocol.
-- Distilled the current design conversation into durable state without storing a full transcript or hidden reasoning.
+- Repository-versioned project memory is a safer handoff boundary than conversational memory alone.
+- Milestone-based compression is more useful than mirroring every chat turn.
+
+## Evidence
+
+- Commit history records code deltas but rarely captures rejected alternatives or why a design was chosen.
+- A committed taskbook is inspectable, searchable, and available across agents/sessions.
+
+## Eliminated
+
+- Copying the full conversation into the repository.
+- Depending on hidden model reasoning for project recovery.
+- Relying only on commit messages or PR descriptions.
+
+## Decisions
+
+- `TASKBOOK.md` is the project-level human-readable context compression layer.
+- Update at milestones, not every turn.
+- Future sessions read the latest project state before resuming substantive work.
 
 ---
 
 # Checkpoint 0003 — V1 Storage and Tool Architecture
 
+## Goal
+
+Choose the lowest-risk implementation boundary for the first usable version.
+
+## Hypotheses
+
+1. Independent reasoning storage is safer than extending `CompressionState`.
+2. Append-only checkpoints are sufficient for V1.
+3. `search_reasoning` should remain separate from `search_context` initially.
+4. Prompt-level checkpoint-before-compress guidance is safer than hard-blocking `compress`.
+
+## Evidence
+
+- `CompressionState` belongs to `acp-kernel` and has its own rebuild/migration semantics.
+- Pi session files expose `parentSession`, and ACP already uses bounded parent-chain inheritance.
+- File-less Pi sessions require in-process state because no sidecar exists.
+- Existing `search_context` has block/message/decompress semantics that should not be overloaded with rationale records.
+- The upstream `src/index.ts` is large and coordinates many safeguards; minimizing edits lowers upstream-sync cost.
+
+## Eliminated
+
+- Adding reasoning fields directly to `CompressionState`.
+- Storing reasoning inside `.acp.json` for V1.
+- Requiring a checkpoint before every compression.
+- Mixing reasoning results into `search_context` immediately.
+
+## Decisions
+
+- Persist to `<session>.reasoning.json` using temp-file + rename atomic replacement.
+- Use in-memory cache keyed by session file/session id.
+- Inherit parent reasoning through a bounded parent-session chain.
+- Use ids `r00001`, `r00002`, ... with schema version and `nextCheckpointId`.
+- Internal lists remain structured arrays; model-facing arguments remain simple newline/semicolon text for non-strict providers.
+- Use a weighted lightweight search path dedicated to reasoning.
+- Use a thin build wrapper and keep the generated package entry as `dist/index.js`.
+
+---
+
+# Checkpoint 0004 — Integration Hardening and Lifecycle Fixes
+
 **Date:** 2026-09-08  
 **Branch:** `2026-09-08_reasoning-memory`
 
 ## Goal
 
-Freeze the smallest low-risk architecture for the first usable Pi reasoning-memory implementation before source edits begin.
+Stabilize the V1 integration before claiming it is ready for real Pi testing.
 
 ## Hypotheses
 
-### H1 — An independent reasoning sidecar is safer than extending kernel compression state
+### H1 — The reasoning store should live for the lifetime of the loaded extension
 
-`CompressionState` belongs to `acp-kernel` and is consumed by compression/rebuild logic. Reasoning memory is adapter-specific metadata with a different lifecycle. Persisting it in `<session>.reasoning.json` avoids coupling a Pi-only experiment to kernel state migration and makes rollback/removal trivial.
+`ReasoningStore` is already isolated by session file/session id. A wrapper-level global reset on every `session_start` is unnecessary and harmful for file-less sessions, because those sessions have no sidecar from which the state can be reloaded.
 
-### H2 — Append-only checkpoints are sufficient for v1
+### H2 — Reasoning behavior must remain isolated from the upstream public factory
 
-Reasoning state is naturally milestone-oriented. An append-only ledger avoids mutation/supersession complexity while preserving the chronology needed for search and recovery. Topic-level replacement can be added later if checkpoint growth becomes a real problem.
+The default package entry may add reasoning memory, but the existing named `createAcpExtension()` should preserve upstream semantics. Otherwise users importing the named factory could receive prompts describing tools they do not have.
 
-### H3 — A dedicated search path is clearer than extending `search_context` immediately
+### H3 — Validation claims must distinguish written tests from executed tests
 
-Existing `search_context` has stable semantics around compression blocks and historical messages, including decompression hints. Mixing reasoning checkpoints into those results would blur the distinction between conversation retrieval and rationale retrieval. A separate `search_reasoning` tool keeps v1 behavior obvious.
-
-### H4 — Prompt-level checkpoint-before-compress guidance is the safest first reasoning-aware compression policy
-
-Hard-blocking `compress` unless a checkpoint exists would be too aggressive for routine logs and could create tool-call loops. A system-prompt rule can target only high-value investigation/decision content and leave ordinary compression unchanged.
+A test suite existing in the branch is evidence of intended coverage, not evidence that it passes. The fork currently has no recorded Actions runs for the Draft PR.
 
 ## Evidence
 
-- `src/state.ts` already keeps adapter-owned `liveRefOrigins` alongside kernel state in the `.acp.json` sidecar, proving the adapter can own persistence outside the kernel model, but that file is tightly tied to compression loading/inheritance semantics.
-- `SessionStateStore` already walks Pi `parentSession` chains up to eight levels, establishing a tested fork/clone inheritance pattern that reasoning storage can mirror.
-- File-less Pi sessions are explicitly supported through per-session in-memory caching; reasoning storage needs the same behavior.
-- `src/search-tool.ts` and `src/search-index.ts` define `search_context` around blocks/messages and decompression commands, supporting a separate rationale-search tool for cleaner semantics.
-- `src/system-prompt.ts` centrally defines compression philosophy and is the lowest-risk place to add checkpoint-before-compress guidance without touching kernel nudge scheduling.
-- `src/index.ts` is large and actively coordinates many ACP safeguards. A wrapper entrypoint can register reasoning tools while leaving the established integration path intact.
+- The earlier wrapper registered `session_start -> store.invalidate()`. For a disk-backed session this causes a reload; for `getSessionFile() === undefined` it destroys the only persisted in-process reasoning state.
+- `ReasoningStore` cache keys already separate `file:<path>` and `session:<id>` state.
+- The public base factory originally registered only the four ACP context tools. Reasoning prompt/tool behavior now lives in a separate default wrapper.
+- GitHub Actions query for the feature branch returned zero workflow runs after Draft PR #1 was opened.
+- GitHub Issues creation returned `410 Issues has been disabled in this repository`.
+- The upstream updater follows registry specs/tags; non-registry/local/git installation specs are not normal auto-updatable registry channels, so no updater fork-specific modification is justified yet.
 
 ## Eliminated
 
-### E1 — Add reasoning fields directly to `CompressionState`
+### E1 — Clear all reasoning cache on `session_start`
 
-Rejected for v1. It would require kernel-aware migration assumptions and could couple provider-independent compression internals to a Pi-only feature.
+Rejected and removed. It breaks file-less/in-memory session durability.
 
-### E2 — Store reasoning inside the existing `.acp.json` envelope
+### E2 — Modify the shared ACP system prompt to advertise reasoning tools
 
-Rejected for v1 despite being technically possible. A separate `.reasoning.json` sidecar reduces blast radius, separates lifecycles, and makes corruption/future schema migration independent of compression state.
+Rejected and reverted. The reasoning prompt is now appended only by the reasoning wrapper.
 
-### E3 — Require a reasoning checkpoint before every `compress` call
+### E3 — Claim CI/typecheck/tests/build have passed
 
-Rejected. Most compression targets are routine logs, redundant reads, or already-consumed output; checkpointing them would add noise and risk loops.
+Rejected until an actual execution environment reports results.
 
-### E4 — Merge reasoning results into `search_context` now
+### E4 — Disable or rewrite the upstream auto-updater preemptively
 
-Rejected for the first version. Separate search gives simpler ranking/output semantics and avoids disturbing a mature retrieval path.
+Not justified yet. Installation method should be verified first; avoid unrelated divergence from upstream.
 
 ## Decisions
 
-1. Persist runtime reasoning to `<Pi session file>.reasoning.json` with atomic temp-file replacement.
-2. Use a per-session in-memory cache when `getSessionFile()` is unavailable.
-3. Mirror parent-session inheritance with a bounded chain walk; a child starts from inherited checkpoints and writes its own combined sidecar on first new checkpoint.
-4. Use checkpoint ids `r00001`, `r00002`, ... and an append-only state with a schema version and `nextCheckpointId`.
-5. Internal checkpoint fields are structured arrays, but tool arguments use simple text fields (newline/semicolon-separated lists) to improve reliability on non-strict local providers such as vLLM/Qwen.
-6. V1 tools are `checkpoint_reasoning` and `search_reasoning` only.
-7. `search_reasoning` gets an independent lightweight weighted keyword scorer with topic/decision/evidence emphasis.
-8. Add system-prompt guidance: checkpoint only durable rationale before compressing root-cause/architecture/decision-rich history; do not checkpoint routine logs or duplicate unchanged state.
-9. Use a thin build entrypoint wrapper to register reasoning tools without invasive edits to the large existing `src/index.ts`; keep output filename `dist/index.js` through tsup entry aliasing.
-10. Preserve the upstream package version on this feature branch.
+1. Keep one long-lived `ReasoningStore` per extension instance; no reasoning-specific `session_start` cache reset.
+2. Add a regression test asserting the reasoning wrapper adds no extra `session_start` handler while still adding one reasoning `before_agent_start` prompt handler.
+3. Keep Draft PR #1 unmerged until real validation exists.
+4. Continue minimizing modifications to upstream-owned files to make future upstream synchronization easier.
+5. When upstream changes, sync fork `master` first, inspect, then merge/rebase into the reasoning branch and revalidate.
 
 ## Open Questions
 
-1. Whether custom-fork testing should force ACP auto-update off to prevent a newer upstream npm release from replacing the modified package. For now, do not alter update semantics until local-install behavior is verified.
-2. Whether a future `reasoning_status` tool is useful enough to justify permanent prompt/tool surface.
-3. Whether automatic export of selected runtime checkpoints into `TASKBOOK.md` should be added after v1 proves stable.
-4. Whether a later version should inject the newest relevant checkpoint automatically when resuming a session, or keep retrieval explicitly search-driven.
+1. How should real validation be run if GitHub Actions remains disabled on the fork: enable Actions, or perform a local clone/build/test cycle?
+2. Should V1 add `reasoning_status`, or is `search_reasoning` sufficient until real usage reveals a need?
+3. Should checkpoints eventually support superseding/compacting older checkpoints by topic?
+4. Should a later version automatically retrieve a recent relevant checkpoint when resuming, or stay explicitly search-driven?
+5. How reliably do local Qwen/DeepSeek/GLM models follow the checkpoint-before-compress policy under non-strict tool calling?
 
 ## Next Steps
 
-1. Implement `src/reasoning-memory.ts` with schema, atomic persistence, fork inheritance, in-memory sessions, normalization, and weighted search.
-2. Implement `src/reasoning-tools.ts` with provider-friendly tool schemas.
-3. Add a wrapper entrypoint and update `tsup.config.ts` to continue producing `dist/index.js`.
-4. Extend `src/system-prompt.ts` with reasoning-memory tool documentation and checkpoint-before-compress policy.
-5. Add unit tests for persistence, parent inheritance, isolation, normalization, ranking, and tool-visible formatting.
-6. Run typecheck/tests/build; record actual results in the next checkpoint before opening any PR.
+1. Obtain real `npm run typecheck`, `npm test`, and `npm run build` results.
+2. Fix any type/build/test failures before adding more surface area.
+3. Install the branch build into Pi and run a practical long-session scenario.
+4. Test with at least one non-strict local provider/model, especially Qwen/vLLM-style tool calling.
+5. Verify parent/fork reasoning recovery in a real Pi session.
+6. Only after validation, consider documentation polish and whether the Draft PR is ready for review.
 
 ## Completed Changes
 
-- Completed architecture inspection of state persistence, runtime ownership, tool registration, context search, system prompt, package output, and relevant tests.
-- Resolved the v1 storage question in favor of an independent reasoning sidecar.
-- Resolved the v1 search question in favor of a dedicated reasoning search tool.
-- Resolved the first compression integration as prompt-level rather than hard enforcement.
+- Implemented reasoning sidecar persistence, normalization, weighted search, parent inheritance, and in-memory session support.
+- Implemented `checkpoint_reasoning` and `search_reasoning`.
+- Added reasoning-aware prompt guidance without changing ACP kernel compression behavior.
+- Added concurrency serialization for checkpoint appends and fail-loud disk persistence.
+- Separated default reasoning wrapper from the upstream named ACP factory.
+- Fixed the in-memory lifecycle bug by removing wrapper `session_start -> store.invalidate()`.
+- Added an entrypoint regression test guarding against reintroducing a global reasoning cache reset.
+- Opened Draft PR #1; kept it unmerged because actual CI has not run.
+- Compressed this taskbook and added a rolling `Current State` section to reduce future recovery cost.
 
 ---
 
 ## Checkpoint Template
-
-Copy this section for future milestones.
 
 ```md
 # Checkpoint NNNN — Short Title
