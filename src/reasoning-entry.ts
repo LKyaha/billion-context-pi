@@ -6,6 +6,7 @@ import baseExtension from "./index.js";
 import { ReasoningStore } from "./reasoning-memory.js";
 import { appendReasoningMemoryPrompt } from "./reasoning-prompt.js";
 import { makeCheckpointReasoningTool, makeSearchReasoningTool } from "./reasoning-tools.js";
+import { isBiliProxyBaseUrl } from "./proxy-detect.js";
 import { isPiHost } from "./runtime.js";
 
 const extension: ExtensionFactory = (pi) => {
@@ -19,6 +20,7 @@ const extension: ExtensionFactory = (pi) => {
   const store = new ReasoningStore();
   pi.on("before_agent_start", (event, ctx) => {
     if (!isPiHost(ctx.sessionManager)) return;
+    if (isBiliProxyBaseUrl((ctx.model as { baseUrl?: string } | undefined)?.baseUrl)) return;
     return { systemPrompt: appendReasoningMemoryPrompt(event.systemPrompt) };
   });
   pi.registerTool(makeCheckpointReasoningTool(store));
