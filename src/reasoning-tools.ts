@@ -80,14 +80,14 @@ export function makeCheckpointReasoningTool(store: ReasoningStore): ToolDefiniti
       if (standDown) return { details: undefined, content: [{ type: "text", text: standDown }] };
       const args = params as CheckpointArgs;
       try {
-        const checkpoint = await store.append(
+        const appended = await store.appendWithStatus(
           ctx.sessionManager.getSessionFile() ?? undefined,
           ctx.sessionManager.getSessionId(),
           checkpointInput(args),
         );
         return {
           details: undefined,
-          content: [{ type: "text", text: formatSavedCheckpoint(checkpoint) }],
+          content: [{ type: "text", text: formatSavedCheckpoint(appended.checkpoint, appended.created) }],
         };
       } catch (error) {
         logThrow("reasoning", error, {
@@ -196,7 +196,10 @@ function dedupe(values: readonly string[]): string[] {
   return out;
 }
 
-function formatSavedCheckpoint(checkpoint: ReasoningCheckpoint): string {
+function formatSavedCheckpoint(checkpoint: ReasoningCheckpoint, created: boolean): string {
+  if (!created) {
+    return `Reasoning checkpoint ${checkpoint.id} already captures this unchanged state: "${checkpoint.topic}". Duplicate not added.`;
+  }
   const counts = [
     checkpoint.hypotheses.length ? `${checkpoint.hypotheses.length} hypotheses` : "",
     checkpoint.evidence.length ? `${checkpoint.evidence.length} evidence` : "",
