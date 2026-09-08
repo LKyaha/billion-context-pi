@@ -11,8 +11,9 @@ import {
   parseReasoningList,
 } from "../src/reasoning-tools.js";
 
-function fakeCtx(sessionFile: string) {
+function fakeCtx(sessionFile: string, baseUrl?: string) {
   return {
+    model: baseUrl ? { baseUrl } : undefined,
     sessionManager: {
       buildContextEntries: () => [],
       getSessionId: () => "reasoning-tool-session",
@@ -105,6 +106,37 @@ test("search_reasoning reports no match without dumping unrelated checkpoints", 
     ctx as never,
   );
   assert.equal(resultText(result), 'No reasoning checkpoints matched "GPU tensor parallel".');
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("reasoning tools stand down when Pi is routed through the bili wire proxy", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "reasoning-tools-proxy-"));
+  const sessionFile = path.join(dir, "session.jsonl");
+  const ctx = fakeCtx(sessionFile, "http://127.0.0.1:8787/bili/https://example.com/v1");
+  const store = new ReasoningStore();
+  const checkpointTool = makeCheckpointReasoningTool(store);
+  const searchTool = makeSearchReasoningTool(store);
+
+  const saved = await checkpointTool.execute(
+    "tc-proxy-1",
+    { topic: "must not persist", goal: "proxy owns context management" },
+    undefined,
+    undefined,
+    ctx as never,
+  );
+  assert.match(resultText(saved), /wire proxy/);
+
+  const searched = await searchTool.execute(
+    "tc-proxy-2",
+    { query: "anything" },
+    undefined,
+    undefined,
+    ctx as never,
+  );
+  assert.match(resultText(searched), /wire proxy/);
+
+  const state = await store.load(sessionFile, "reasoning-tool-session");
+  assert.equal(state.checkpoints.length, 0, "proxy-routed sessions must not create local reasoning state");
   await rm(dir, { recursive: true, force: true });
 });
 
