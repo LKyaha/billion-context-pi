@@ -76,6 +76,25 @@ test("append persists and reloads a structured checkpoint", async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+test("exact duplicate checkpoints are skipped without consuming a new id", async () => {
+  const dir = await tempDir();
+  const sessionFile = path.join(dir, "dedupe.jsonl");
+  const store = new ReasoningStore();
+
+  const first = await store.appendWithStatus(sessionFile, "dedupe", input(" 128K   OOM "));
+  const second = await store.appendWithStatus(sessionFile, "dedupe", input("128K OOM"));
+
+  assert.equal(first.created, true);
+  assert.equal(second.created, false);
+  assert.equal(second.checkpoint.id, first.checkpoint.id);
+
+  const reloaded = await new ReasoningStore().load(sessionFile, "dedupe");
+  assert.equal(reloaded.checkpoints.length, 1);
+  assert.equal(reloaded.nextCheckpointId, 2);
+  assert.equal(reloaded.checkpoints[0]!.topic, "128K OOM");
+  await rm(dir, { recursive: true, force: true });
+});
+
 test("parallel appends serialize ids and preserve every checkpoint", async () => {
   const dir = await tempDir();
   const sessionFile = path.join(dir, "parallel.jsonl");
