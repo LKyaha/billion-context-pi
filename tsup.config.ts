@@ -6,7 +6,7 @@ const pkg = JSON.parse(
 );
 
 export default defineConfig({
-  entry: ["src/reasoning-entry.ts"],
+  entry: { index: "src/reasoning-entry.ts" },
   format: ["esm"],
   target: "es2022",
   dts: false,
