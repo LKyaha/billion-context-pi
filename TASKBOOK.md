@@ -7,6 +7,7 @@
 **Date:** 2026-09-13  
 **Repository:** `LKyaha/billion-context-pi`  
 **Branch:** `2026-09-13_thin-reasoning-ledger`  
+**Draft PR:** `#2`  
 **Upstream baseline:** `ranxianglei/billion-context-pi@dd183bda74ebc93cd0637618445c729024b91718`
 
 ### Goal
@@ -19,13 +20,7 @@ Keep upstream ACP as the primary long-context memory system and add only the mis
 
 ### Why the old fork was reset
 
-Upstream moved significantly after the original 2026-09-08 fork and now already provides:
-
-- reasoning-aware ACP summaries that explicitly keep decisions + rationale, experiment purpose, failed approaches, unresolved work, and goal evolution;
-- `compress.reasoning` / `reasoning-drop`, which removes oversized historical thinking from the outgoing request view while preserving persisted history;
-- prompt packs and substantial host/runtime hardening.
-
-Therefore duplicating those behaviors in the fork would increase merge cost without adding unique capability.
+Upstream moved significantly after the original 2026-09-08 fork and now already provides rationale-aware ACP summaries, `compress.reasoning` / reasoning-drop, prompt packs, and substantial host/runtime hardening. Carrying the old fork forward would duplicate upstream behavior and increase merge cost.
 
 ### Thin architecture
 
@@ -35,7 +30,7 @@ latest upstream ACP
 ├── rationale-aware T1/T2/T3 summaries
 ├── reasoning-drop
 ├── prompt packs
-└── all upstream host/proxy/runtime safeguards
+└── upstream host/proxy/runtime safeguards
 
 thin wrapper
 ├── checkpoint_reasoning
@@ -51,36 +46,49 @@ thin wrapper
 ### Design decisions
 
 1. **ACP summaries remain primary memory.** Do not checkpoint every compression or every turn.
-2. **Ledger is sparse.** Checkpoint only root causes, architecture choices, ruled-out approaches, experiment conclusions, or rationale likely to be lost by later T2/T3 distillation.
+2. **Ledger is sparse.** Checkpoint root causes, architecture choices, ruled-out approaches, experiment conclusions, or rationale likely to be lost by later T2/T3 distillation.
 3. **No raw/private chain-of-thought.** Store only inspectable task-relevant reasoning state.
 4. **No secrets.** API keys, tokens, passwords, cookies, private keys, and recovery codes must not enter persistent reasoning sidecars.
-5. **Old sidecar schema stays compatible.** The new thin branch keeps version-1 `r00001...` checkpoints so prior test data can still be read.
-6. **Minimize upstream edits.** Upstream `src/index.ts` is untouched; only the build entry changes to a thin wrapper.
-7. **Reuse upstream safety helpers.** Unsupported-host and `/bili/` proxy detection come from current upstream modules instead of custom copies.
+5. **Old sidecar schema stays compatible.** Version-1 `r00001...` checkpoints remain readable.
+6. **Minimize upstream edits.** Upstream `src/index.ts` is untouched; only the build entry points to a thin wrapper.
+7. **Reuse upstream safeguards.** Unsupported-host and `/bili/` proxy helpers come from current upstream modules.
 
-### Implemented on this branch
+### Current diff surface
 
 - `src/reasoning-memory.ts`
 - `src/reasoning-tools.ts`
 - `src/reasoning-prompt.ts`
 - `src/reasoning-entry.ts`
-- `tsup.config.ts`: entry switched from `src/index.ts` to `src/reasoning-entry.ts`
+- `tests/reasoning-ledger.test.ts`
+- `TASKBOOK.md`
+- `tsup.config.ts` — one functional change: named `index` output now builds from `src/reasoning-entry.ts`
 
-### Validation status
+### Validation — PASS
 
-Not yet claimed passing for this new upstream baseline. The previous fork passed its CI/E2E matrix, but this branch must be revalidated because upstream changed substantially.
+Source commit `cc040473fc757219b73ed06246e402be8f8d9f82` passed current-upstream validation:
+
+- `pr-validation` — PASS
+- Ubuntu / Node 22 — `npm ci`, typecheck, build, full tests — PASS
+- Ubuntu / Node 24 — PASS
+- Windows / Node 22 — PASS
+- Windows / Node 24 — PASS
+- Docker E2E — PASS
+- Ubuntu E2E — PASS
+- Windows E2E — PASS
+
+The PR Build Artifact workflow builds successfully but cannot publish the PR-tag npm package because this fork does not have the upstream `NPM_TOKEN`; this is credential/infrastructure-only.
 
 ## Checkpoint 0001 — Rebase by reconstruction
 
 ### Hypothesis
 
-Reconstructing the feature from the latest upstream commit is safer than rebasing the old 35+ commit feature branch because it avoids carrying obsolete compatibility code and duplicated functionality.
+Reconstructing the feature from latest upstream is safer than rebasing the old 35+ commit feature branch.
 
 ### Evidence
 
-- Upstream current master already contains reasoning-drop and rationale-aware compression instructions.
-- Current upstream tool registration remains centered on the original ACP tools; no `checkpoint_reasoning` or `search_reasoning` exists.
-- Tier-3 compression intentionally becomes a compact lookup index and can drop detailed rationale, leaving a clear role for a separate sparse ledger.
+- Upstream already contains reasoning-drop and strong rationale-aware compression instructions.
+- Upstream still has no `checkpoint_reasoning` or `search_reasoning` tools.
+- Tier-3 intentionally becomes a compact lookup index and may drop detailed rationale, leaving a clear role for a sparse external ledger.
 
 ### Eliminated
 
@@ -89,10 +97,22 @@ Reconstructing the feature from the latest upstream commit is safer than rebasin
 - Add a second full context-management state machine.
 - Persist full model thinking.
 
+## Checkpoint 0002 — Latest-upstream CI/E2E validated
+
+### Evidence
+
+- First E2E run caught one packaging regression: using `entry: ["src/reasoning-entry.ts"]` made tsup emit `dist/reasoning-entry.js`, while the package and E2E contract require `dist/index.js`.
+- Fix: use `entry: { index: "src/reasoning-entry.ts" }`. No reasoning logic changed.
+- After the fix, the complete CI matrix and all three E2E environments passed.
+
+### Decision
+
+The thin-ledger source is now technically compatible with the current upstream baseline. Keep PR #2 Draft until real Pi field tests validate session restart, Pi fork inheritance, and behavior with at least one non-strict local provider.
+
 ### Next steps
 
-1. Add focused tests for store persistence/inheritance/search/dedup.
-2. Add entrypoint tests for tool registration and stand-down behavior.
-3. Run upstream CI/E2E on the new branch.
-4. Fix only failures caused by the thin layer.
-5. After green CI, run real Pi persistence/fork tests with a local/non-strict provider.
+1. Install/build this branch in real Pi.
+2. Create a checkpoint, restart/resume the session, and verify `search_reasoning` recovery.
+3. Fork a Pi session and verify inherited checkpoint + continued `rNNNNN` ids.
+4. Run a decision-rich compression scenario and confirm ACP remains the primary memory while the ledger preserves WHY beyond heavy distillation.
+5. Test at least one Qwen/vLLM-style non-strict tool-calling provider.
